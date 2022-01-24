@@ -67,15 +67,15 @@
 #define COEFF3072_H_16_LENGTH 16
 #define COEFF1536_H_32_LENGTH 32
 #define COEFF1536_H_64_LENGTH 64
-float coeff3072_768_H_16[COEFF3072_H_16_LENGTH];
-float coeff1536_384_H_32[COEFF1536_H_32_LENGTH];
-float coeff1536_192_H_32[COEFF1536_H_32_LENGTH];
-float coeff1536_96_H_32[COEFF1536_H_32_LENGTH];
-float coeff1536_48_H_32[COEFF1536_H_32_LENGTH];
-float coeff1536_384_H_64[COEFF1536_H_64_LENGTH];
-float coeff1536_192_H_64[COEFF1536_H_64_LENGTH];
-float coeff1536_96_H_64[COEFF1536_H_64_LENGTH];
-float coeff1536_48_H_64[COEFF1536_H_64_LENGTH];
+extern float coeff3072_768_H_16[COEFF3072_H_16_LENGTH];
+extern float coeff1536_384_H_32[COEFF1536_H_32_LENGTH];
+extern float coeff1536_192_H_32[COEFF1536_H_32_LENGTH];
+extern float coeff1536_96_H_32[COEFF1536_H_32_LENGTH];
+extern float coeff1536_48_H_32[COEFF1536_H_32_LENGTH];
+extern float coeff1536_384_H_64[COEFF1536_H_64_LENGTH];
+extern float coeff1536_192_H_64[COEFF1536_H_64_LENGTH];
+extern float coeff1536_96_H_64[COEFF1536_H_64_LENGTH];
+extern float coeff1536_48_H_64[COEFF1536_H_64_LENGTH];
 
 struct main_cb {
 	int total_num_rcvrs;
@@ -141,9 +141,9 @@ void rtl_sighandler(int signum);
 int get_addr(int sock, char* ifname);
 void hpsdrsim_reveal(void);
 
-pthread_t hpsdrsim_thread_id;
+static pthread_t hpsdrsim_thread_id;
 void* hpsdrsim_thread(void* arg);
-pthread_t watchdog_thread_id;
+static pthread_t watchdog_thread_id;
 void* hpsdrsim_watchdog_thread(void* arg);
 void* hpsdrsim_sendiq_thr_func(void* arg);
 void* rtl_read_thr_func(void* arg);
