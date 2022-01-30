@@ -96,7 +96,7 @@ get_addr(int sock, char* ifname) {
 	}
 
 	ip_address = inaddrr(ifr_addr.sa_data).s_addr;
-
+ip_address = 0;
 	if(ioctl(sock, SIOCGIFHWADDR, ifr) < 0) {
 		printf("No %s interface.\n", ifname);
 		return -1;
