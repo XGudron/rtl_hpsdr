@@ -210,19 +210,19 @@ void correct_iq(struct rcvr_cb* rcb) {
 	
 	switch(mcb->output_rate) {
 		case 48000:
-			count = count / 16;
+			count = count / 32;
 			break;
 
 		case 96000:
-			count = count / 8;
+			count = count / 16;
 			break;
 
 		case 192000:
-			count = count / 4;
+			count = count / 8;
 			break;
 
 		case 384000:
-			count = count / 2;
+			count = count / 4;
 			break;
 	}
 	
