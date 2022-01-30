@@ -200,12 +200,69 @@ down_loop(struct rcvr_cb* rcb, int pass) {
 	}
 
 	// Move the last coeff_len*2 length of buffer to the front for the next call
-	memmove(orig_buf, &orig_buf[count - (coeff_len * 2)],
-	        coeff_len * 2 * sizeof(float));
+	memmove(orig_buf, &orig_buf[count - (coeff_len * 2)], coeff_len * 2 * sizeof(float));
+}
+
+void correct_iq(struct rcvr_cb* rcb) {
+	float* buf = &(rcb->iqSamples[0]);
+	struct main_cb* mcb = rcb->mcb;
+	int count = RTL_READ_COUNT / 2;
+	
+	switch(mcb->output_rate) {
+		case 48000:
+			count = count / 16;
+			break;
+
+		case 96000:
+			count = count / 8;
+			break;
+
+		case 192000:
+			count = count / 4;
+			break;
+
+		case 384000:
+			count = count / 2;
+			break;
+	}
+	
+	//Settings
+	static const float32_t A1 = (1.0f - powf(2, -7)); // (1-2^(-11))
+	
+	//I
+	static float I_x_prev = 0.0f;
+	static float I_y_prev = 0.0f;
+	for (int i = 0; i < count; i++)
+	{
+		float sampleIn = buf[i];
+		float sampleOut = 0;
+		float delta_x = sampleIn - I_x_prev;
+		float a1_y_prev = A1 * I_y_prev;
+		sampleOut = delta_x + a1_y_prev;
+		I_x_prev = sampleIn;
+		I_y_prev = sampleOut;
+		buf[i] = sampleOut;
+	}
+	
+	//Q
+	static float Q_x_prev = 0.0f;
+	static float Q_y_prev = 0.0f;
+	for (int i = 0; i < count; i++)
+	{
+		float sampleIn = buf[count + i];
+		float sampleOut = 0;
+		float delta_x = sampleIn - Q_x_prev;
+		float a1_y_prev = A1 * Q_y_prev;
+		sampleOut = delta_x + a1_y_prev;
+		Q_x_prev = sampleIn;
+		Q_y_prev = sampleOut;
+		buf[count + i] = sampleOut;
+	}
 }
 
 void
 downsample(struct rcvr_cb * rcb) {
 	down_loop(rcb, 1);
 	down_loop(rcb, 2);
+	correct_iq(rcb);
 }
