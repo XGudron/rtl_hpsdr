@@ -422,6 +422,10 @@ hpsdrsim_reveal (void)
 	    perror ("3 bind socket failed for reveal_socket\n");
 	    exit (1);
 	 }
+	 //network_error = 0;
+    //running = 1;
+    //ready = true;
+	 //continue;
       }
       else {
 	 //printf("Was NOT discovered by %s\n", inet_ntoa(their_addr.sin_addr));
