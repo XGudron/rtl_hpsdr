@@ -10,9 +10,10 @@ else
     CFLAGS = -O4 -lpthread -lrtlsdr
 endif
 
-CFLAGS += -I. -lpthread -lrtlsdr -lasound -lm -lfftw3
-DEPS = rtl_hpsdr.h downsample.c local_sound.c convenience.c
-OBJ = convenience.o downsample.o rtl_hpsdr.o local_sound.o
+CC = gcc
+CFLAGS += -I. -lpthread -lrtlsdr -lasound
+DEPS = rtl_hpsdr.h coeff.c downsample.c local_sound.c
+OBJ = coeff.o downsample.o rtl_hpsdr.o local_sound.o
 PROG = rtl_hpsdr
 
 %.o: %.c $(DEPS)
