@@ -41,7 +41,7 @@ down_loop(struct rcvr_cb* rcb, int pass) {
 	float* buf, *out;
 	float* pSrc, *orig_buf;
 	const vector_type* pFil;
-	vector_type sum1;//, sum2;
+	vector_type sum1, sum2;
 	struct main_cb* mcb = rcb->mcb;
 
 	if(1 == pass) {
@@ -227,7 +227,7 @@ void correct_iq(struct rcvr_cb* rcb) {
 	}
 	
 	//Settings
-	static const float32_t A1 = (1.0f - powf(2, -7)); // (1-2^(-11))
+	static const float A1 = (1.0f - powf(2, -7)); // (1-2^(-11))
 	
 	//I
 	static float I_x_prev = 0.0f;
