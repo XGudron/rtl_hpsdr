@@ -764,7 +764,7 @@ rtl_read_thr_func(void* arg) {
 
 	//printf("ENTERING rtl_read_thr_func() rcvr %d\n", i+1);
 	r = rtlsdr_read_async(rcb->rtldev, rtlsdr_callback,
-	                      (void*)(&mcb.rcb[i]), 1, RTL_READ_COUNT);
+	                      (void*)(&mcb.rcb[i]), 0, RTL_READ_COUNT);
 
 	//printf("EXITING rtl_read_thr_func() rcvr %d\n", i+1);
 	pthread_exit(NULL);
