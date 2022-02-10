@@ -22,15 +22,18 @@
 #ifdef INCLUDE_NEON
 #define vector_type float32x4_t
 #define vector_zero vmovq_n_f32(0)
+#define vector_load(x) vld1q_f32(x)
 #define vector_mac(x,y,z) vmlaq_f32((x), vld1q_f32((y)), (z))
 #define vector_store(x,y,z) vst1q_f32((x), vaddq_f32((y), vcombine_f32(vget_low_f32((z)), vget_high_f32((y)))))
 #elif defined INCLUDE_SSE2
 #define vector_type __m128
 #define vector_zero _mm_setzero_ps()
+#define vector_load(x) _mm_load_ps(x)
 #define vector_mac(x,y,z) _mm_add_ps((x), _mm_mul_ps(_mm_load_ps((y)), (z)))
 #define vector_store(x,y,z) _mm_store_ps((x), _mm_add_ps((y), _mm_shuffle_ps((y), (y), _MM_SHUFFLE(1,0,3,2))))
 #else
 #define vector_type float
+#define vector_load(x) (*x)
 #endif
 
 void
@@ -38,9 +41,9 @@ down_loop(struct rcvr_cb* rcb, int pass) {
 	int i, j, k = 0;
 	int dsample, count, coeff_len;
 	bool IQ_swap;
-	float* buf, *out;
-	float* pSrc, *orig_buf;
-	const vector_type* pFil;
+	float *buf, *out;
+	float *pSrc, *orig_buf;
+	const vector_type *pFil, *pFilStored;
 	vector_type sum1, sum2;
 	struct main_cb* mcb = rcb->mcb;
 
@@ -52,6 +55,7 @@ down_loop(struct rcvr_cb* rcb, int pass) {
 		coeff_len = COEFF3072_H_16_LENGTH;
 		buf = &(rcb->iq_buf[0]);
 		out = &(rcb->iq_buf_final[COEFF1536_H_32_LENGTH * 2]);
+		pFilStored = (const vector_type*) mcb->align3072_768_H;
 	} else {
 		IQ_swap = false;
 		count = RTL_READ_COUNT / 2;
@@ -62,18 +66,23 @@ down_loop(struct rcvr_cb* rcb, int pass) {
 		switch(mcb->output_rate) {
 		case 48000:
 			dsample = DOWNSAMPLE_192 * 2;
+			// filter coefficients. NOTE: Assumes coefficients are aligned to 16-byte boundary
+			pFilStored = (const vector_type*) mcb->align1536_48_H;
 			break;
 
 		case 96000:
 			dsample = DOWNSAMPLE_192;
+			pFilStored = (const vector_type*) mcb->align1536_96_H;
 			break;
 
 		case 192000:
 			dsample = DOWNSAMPLE_192 / 2;
+			pFilStored = (const vector_type*) mcb->align1536_192_H;
 			break;
 
 		case 384000:
 			dsample = DOWNSAMPLE_192 / 4;
+			pFilStored = (const vector_type*) mcb->align1536_384_H;
 			break;
 		}
 	}
@@ -85,50 +94,18 @@ down_loop(struct rcvr_cb* rcb, int pass) {
 	// filter is evaluated for two I/Q samples with each iteration, thus use of 'j += 2'
 	for(j = 0; j < count / 2; j += 2) {
 		pSrc = buf;
-
-		// filter coefficients. NOTE: Assumes coefficients are aligned to 16-byte boundary
-		if(1 == pass)
-			pFil = (const vector_type*) mcb->align3072_768_H;
-		else {
-			switch(mcb->output_rate) {
-			case 48000:
-				pFil = (const vector_type*) mcb->align1536_48_H;
-				break;
-
-			case 96000:
-				pFil = (const vector_type*) mcb->align1536_96_H;
-				break;
-
-			case 192000:
-				pFil = (const vector_type*) mcb->align1536_192_H;
-				break;
-
-			case 384000:
-				pFil = (const vector_type*) mcb->align1536_384_H;
-				break;
-			}
-		}
-
+		pFil = pFilStored;
 		sum1 = vector_zero;
-//        sum1 = sum2 = vector_zero;
 
 		for(i = 0; i < coeff_len / 8; i++) {
 			// Unroll loop for efficiency & calculate filter for 2*2 I/Q samples
 			// at each pass
 
 			// sum1 is accu for 2*2 filtered I/Q data at the primary data offset
-			// sum2 is accu for 2*2 filtered I/Q data for the next sample offset.
 			sum1 = vector_mac(sum1, pSrc, pFil[0]);
-//            sum2 = vector_mac(sum2, pSrc+2, pFil[0]);
-
 			sum1 = vector_mac(sum1, pSrc + 4, pFil[1]);
-//            sum2 = vector_mac(sum2, pSrc+6, pFil[1]);
-
 			sum1 = vector_mac(sum1, pSrc + 8, pFil[2]);
-//            sum2 = vector_mac(sum2, pSrc+10, pFil[2]);
-
 			sum1 = vector_mac(sum1, pSrc + 12, pFil[3]);
-//            sum2 = vector_mac(sum2, pSrc+14, pFil[3]);
 
 			pSrc += 16;
 			pFil += 4;
@@ -143,16 +120,16 @@ down_loop(struct rcvr_cb* rcb, int pass) {
 		if(0 == ((j + 2) % dsample)) {
 			// post-shuffle & add the filtered values and store to dest.
 			vector_store(rcb->dest, sum1, sum1);
-#if 0
-			_mm_store_ps(rcb->dest, _mm_add_ps(_mm_shuffle_ps(sum1, sum2, _MM_SHUFFLE(1, 0, 3, 2)),       // s2_1 s2_0 s1_3 s1_2
-			                                   _mm_shuffle_ps(sum1, sum2, _MM_SHUFFLE(3, 2, 1, 0))      // s2_3 s2_2 s1_1 s1_0
-			                                  ));
-#endif
 
 			// Since we're decimating we only need one of the sums
-			out[k++] = (IQ_swap) ? rcb->dest[0] : rcb->dest[1];
-			out[k++] = (IQ_swap) ? rcb->dest[1] : rcb->dest[0];
-
+			if(IQ_swap) {
+				out[k++] = rcb->dest[0];
+				out[k++] = rcb->dest[1];
+			} else {
+				out[k++] = rcb->dest[1];
+				out[k++] = rcb->dest[0];
+			}
+		}
 #else // non SIMD
 
 	for(j = 0; j < count; j += 2) {
@@ -195,8 +172,8 @@ down_loop(struct rcvr_cb* rcb, int pass) {
 		if(0 == (((j + 2) / 2) % dsample)) {
 			out[k++] = (IQ_swap) ? sum2 : sum1;
 			out[k++] = (IQ_swap) ? sum1 : sum2;
-#endif
 		}
+#endif
 	}
 
 	// Move the last coeff_len*2 length of buffer to the front for the next call
