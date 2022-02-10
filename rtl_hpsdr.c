@@ -990,7 +990,7 @@ main(int argc, char* argv[]) {
 		case 'l':
 			mcb.length_fir = atoi(optarg);
 
-			if((mcb.length_fir != 32) && (mcb.length_fir != 64)) {
+			if((mcb.length_fir != 16) && (mcb.length_fir != 32) && (mcb.length_fir != 64)) {
 				printf("Invalid coeffient length %d\n", mcb.length_fir);
 				usage(progname);
 			}
@@ -1070,13 +1070,18 @@ main(int argc, char* argv[]) {
 	format_payload();
 
 	switch(mcb.length_fir) {
+	case 16:
+		mcb.coeff_48 = coeff1536_48_H_16;
+		mcb.coeff_96 = coeff1536_96_H_16;
+		mcb.coeff_192 = coeff1536_192_H_16;
+		mcb.coeff_384 = coeff1536_384_H_16;
+		break;
 	case 32:
 		mcb.coeff_48 = coeff1536_48_H_32;
 		mcb.coeff_96 = coeff1536_96_H_32;
 		mcb.coeff_192 = coeff1536_192_H_32;
 		mcb.coeff_384 = coeff1536_384_H_32;
 		break;
-
 	case 64:
 		mcb.coeff_48 = coeff1536_48_H_64;
 		mcb.coeff_96 = coeff1536_96_H_64;
