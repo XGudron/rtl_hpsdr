@@ -61,7 +61,6 @@
 #define RTL_SAMPLE_RATE (192000 * DOWNSAMPLE_192)
 #define RTL_READ_COUNT (2048 * DOWNSAMPLE_192 * 8)
 #define MAX_RCVRS 8     // cuSDR64 limits this to 7
-#define IQ_FRAME_DATA_LEN 63
 #define MAXSTR 64
 
 #define COEFF3072_H_16_LENGTH 16

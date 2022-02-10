@@ -1224,7 +1224,7 @@ main(int argc, char* argv[]) {
 			payload[6] = (hpsdr_sequence >> 8) & 0xff;
 			payload[7] = hpsdr_sequence & 0xff;
 
-			if(sendto(reveal_socket, payload, HPSDR_FRAME_LEN, 0,
+			if(sendto(reveal_socket, payload, HPSDR_FRAME_LEN, MSG_DONTWAIT,
 			          (struct sockaddr*) &their_addr,
 			          sizeof(their_addr)) < 0) {
 				if(running) {
