@@ -54,7 +54,17 @@ down_loop(struct rcvr_cb* rcb, int pass) {
 		count = RTL_READ_COUNT;
 		coeff_len = COEFF3072_H_16_LENGTH;
 		buf = &(rcb->iq_buf[0]);
-		out = &(rcb->iq_buf_final[COEFF1536_H_32_LENGTH * 2]);
+		switch(mcb->length_fir) {
+			case 16:
+				out = &(rcb->iq_buf_final[COEFF1536_H_16_LENGTH * 2]);
+				break;
+			case 32:
+				out = &(rcb->iq_buf_final[COEFF1536_H_32_LENGTH * 2]);
+				break;
+			case 64:
+				out = &(rcb->iq_buf_final[COEFF1536_H_64_LENGTH * 2]);
+				break;
+		}
 		pFilStored = (const vector_type*) mcb->align3072_768_H;
 	} else {
 		IQ_swap = false;
