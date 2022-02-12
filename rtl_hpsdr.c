@@ -261,6 +261,12 @@ hpsdrsim_reveal(void) {
 
 void
 load_packet(struct rcvr_cb* rcb) {
+	pthread_mutex_lock(&done_send_lock);
+	while(send_flags & rcb->rcvr_mask) {
+		pthread_cond_wait(&done_send_cond, &done_send_lock);
+	}
+	pthread_mutex_unlock(&done_send_lock);
+
 	int b, i, j, k, copy_total = (mcb.active_num_rcvrs - 1) + num_copy_rcvrs;
 	// if we need to copy a receiver we'll choose the last active 'real' one
 	bool do_copy = ((num_copy_rcvrs > 0)
@@ -309,14 +315,6 @@ load_packet(struct rcvr_cb* rcb) {
 	send_flags |= rcb->rcvr_mask;
 	pthread_cond_broadcast(&send_cond);
 	pthread_mutex_unlock(&send_lock);
-
-	pthread_mutex_lock(&done_send_lock);
-
-	while(send_flags & rcb->rcvr_mask) {
-		pthread_cond_wait(&done_send_cond, &done_send_lock);
-	}
-
-	pthread_mutex_unlock(&done_send_lock);
 }
 
 void*
