@@ -18,6 +18,7 @@
  */
 
 #include "rtl_hpsdr.h"
+#include "biquad.h"
 
 #ifdef INCLUDE_NEON
 #define vector_type float32x4_t
@@ -36,220 +37,178 @@
 #define vector_load(x) (*x)
 #endif
 
-void
-down_loop(struct rcvr_cb* rcb, int pass) {
-	int i, j, k = 0;
-	int dsample, count, coeff_len;
-	bool IQ_swap;
-	float *buf, *out;
-	float *pSrc, *orig_buf;
-	const vector_type *pFil, *pFilStored;
-	vector_type sum1, sum2;
-	struct main_cb* mcb = rcb->mcb;
+iir_filter_t *filter;
+static float32_t IIR_LPF_Coeffs[BIQUAD_COEFF_IN_STAGE * IIR_LPF_STAGES] = {0};
 
-	if(1 == pass) {
-		// 1st pass filter is hb for 768000
-		IQ_swap = true;
-		dsample = 2;
-		count = RTL_READ_COUNT;
-		coeff_len = COEFF3072_H_16_LENGTH;
-		buf = &(rcb->iq_buf[0]);
-		switch(mcb->length_fir) {
-			case 16:
-				out = &(rcb->iq_buf_final[COEFF1536_H_16_LENGTH * 2]);
-				break;
-			case 32:
-				out = &(rcb->iq_buf_final[COEFF1536_H_32_LENGTH * 2]);
-				break;
-			case 64:
-				out = &(rcb->iq_buf_final[COEFF1536_H_64_LENGTH * 2]);
-				break;
-		}
-		pFilStored = (const vector_type*) mcb->align3072_768_H;
-	} else {
-		IQ_swap = false;
-		count = RTL_READ_COUNT / 2;
-		coeff_len = mcb->length_fir;
-		buf = &(rcb->iq_buf_final[0]);
-		out = &(rcb->iqSamples[rcb->iqSamples_remaining * 2]);
+void arm_biquad_cascade_df2T_f32_rolled(const arm_biquad_cascade_df2T_instance_f32 * S,const float32_t * pSrc,float32_t * pDst,uint32_t blockSize)
+{
+  const float32_t *pIn = pSrc;                         /* Source pointer */
+        float32_t *pOut = pDst;                        /* Destination pointer */
+        float32_t *pState = S->pState;                 /* State pointer */
+  const float32_t *pCoeffs = S->pCoeffs;               /* Coefficient pointer */
+        float32_t acc1;                                /* Accumulator */
+        float32_t b0, b1, b2, a1, a2;                  /* Filter coefficients */
+        float32_t Xn1;                                 /* Temporary input */
+        float32_t d1, d2;                              /* State variables */
+        uint32_t sample, stage = S->numStages;         /* Loop counters */
 
-		switch(mcb->output_rate) {
-		case 48000:
-			dsample = DOWNSAMPLE_192 * 2;
-			// filter coefficients. NOTE: Assumes coefficients are aligned to 16-byte boundary
-			pFilStored = (const vector_type*) mcb->align1536_48_H;
-			break;
+  do
+  {
+     /* Reading the coefficients */
+     b0 = pCoeffs[0];
+     b1 = pCoeffs[1];
+     b2 = pCoeffs[2];
+     a1 = pCoeffs[3];
+     a2 = pCoeffs[4];
 
-		case 96000:
-			dsample = DOWNSAMPLE_192;
-			pFilStored = (const vector_type*) mcb->align1536_96_H;
-			break;
+     /* Reading the state values */
+     d1 = pState[0];
+     d2 = pState[1];
 
-		case 192000:
-			dsample = DOWNSAMPLE_192 / 2;
-			pFilStored = (const vector_type*) mcb->align1536_192_H;
-			break;
+     pCoeffs += 5U;
 
-		case 384000:
-			dsample = DOWNSAMPLE_192 / 4;
-			pFilStored = (const vector_type*) mcb->align1536_384_H;
-			break;
-		}
-	}
+      /* Initialize blkCnt with number of samples */
+      sample = blockSize;
 
-	orig_buf = buf;
+      while (sample > 0U) {
+        Xn1 = *pIn++;
 
-#if defined(INCLUDE_NEON) || defined(INCLUDE_SSE2)
+        acc1 = b0 * Xn1 + d1;
 
-	// filter is evaluated for two I/Q samples with each iteration, thus use of 'j += 2'
-	for(j = 0; j < count / 2; j += 2) {
-		pSrc = buf;
-		pFil = pFilStored;
-		sum1 = vector_zero;
+        d1 = b1 * Xn1 + d2;
+        d1 += a1 * acc1;
 
-		for(i = 0; i < coeff_len / 8; i++) {
-			// Unroll loop for efficiency & calculate filter for 2*2 I/Q samples
-			// at each pass
+        d2 = b2 * Xn1;
+        d2 += a2 * acc1;
 
-			// sum1 is accu for 2*2 filtered I/Q data at the primary data offset
-			sum1 = vector_mac(sum1, pSrc, pFil[0]);
-			sum1 = vector_mac(sum1, pSrc + 4, pFil[1]);
-			sum1 = vector_mac(sum1, pSrc + 8, pFil[2]);
-			sum1 = vector_mac(sum1, pSrc + 12, pFil[3]);
+        *pOut++ = acc1;
 
-			pSrc += 16;
-			pFil += 4;
-		}
+        /* decrement loop counter */
+        sample--;
+      }
 
-		buf += 4;
+      /* Store the updated state variables back into the state array */
+      pState[0] = d1;
+      pState[1] = d2;
 
-		// Now sum1 and sum2 both have a filtered 2-channel sample each, but we still need
-		// to sum the two hi- and lo-floats of these registers together. Only perform this
-		// if we actually need it for the downsampled output data.
-		// UPDATE: since we're throwing away sum2, don't bother calculating it.
-		if(0 == ((j + 2) % dsample)) {
-			// post-shuffle & add the filtered values and store to dest.
-			vector_store(rcb->dest, sum1, sum1);
+      pState += 2U;
 
-			// Since we're decimating we only need one of the sums
-			if(IQ_swap) {
-				out[k++] = rcb->dest[0];
-				out[k++] = rcb->dest[1];
-			} else {
-				out[k++] = rcb->dest[1];
-				out[k++] = rcb->dest[0];
-			}
-		}
-#else // non SIMD
+      /* The current stage output is given as the input to the next stage */
+      pIn = pDst;
 
-	for(j = 0; j < count; j += 2) {
+      /* Reset the output working pointer */
+      pOut = pDst;
 
-		pSrc = buf;
+      /* decrement loop counter */
+      stage--;
 
-		if(1 == pass)
-			pFil = mcb->coeff_768;
-		else {
-			switch(mcb->output_rate) {
-			case 48000:
-				pFil = mcb->coeff_48;
-				break;
-
-			case 96000:
-				pFil = mcb->coeff_96;
-				break;
-
-			case 192000:
-				pFil = mcb->coeff_192;
-				break;
-
-			case 384000:
-				pFil = mcb->coeff_384;
-				break;
-			}
-		}
-
-		sum1 = sum2 = 0.0f;
-
-		for(i = 0; i < coeff_len; i++) {
-			sum1 += pSrc[0] * pFil[0];
-			sum2 += pSrc[1] * pFil[0];
-			pSrc += 2;
-			pFil++;
-		}
-
-		buf += 2;
-
-		if(0 == (((j + 2) / 2) % dsample)) {
-			out[k++] = (IQ_swap) ? sum2 : sum1;
-			out[k++] = (IQ_swap) ? sum1 : sum2;
-		}
-#endif
-	}
-
-	// Move the last coeff_len*2 length of buffer to the front for the next call
-	memmove(orig_buf, &orig_buf[count - (coeff_len * 2)], coeff_len * 2 * sizeof(float));
+   } while (stage > 0U);
 }
 
-void correct_iq(struct rcvr_cb* rcb) {
-	float* buf = &(rcb->iqSamples[0]);
-	struct main_cb* mcb = rcb->mcb;
-	int count = RTL_READ_COUNT / 2;
-	
-	switch(mcb->output_rate) {
-		case 48000:
-			count = count / 32;
-			break;
-
-		case 96000:
-			count = count / 16;
-			break;
-
-		case 192000:
-			count = count / 8;
-			break;
-
-		case 384000:
-			count = count / 4;
-			break;
-	}
-	
-	//Settings
-	static const float A1 = (1.0f - powf(2, -7)); // (1-2^(-11))
-	
-	//I
-	static float I_x_prev = 0.0f;
-	static float I_y_prev = 0.0f;
-	for (int i = 0; i < count; i++)
+void fill_biquad_coeffs(iir_filter_t *filter, float32_t *coeffs, uint8_t sect_num)
+{
+	//transpose and save coefficients
+	uint16_t ind = 0;
+	for(uint8_t sect = 0; sect < sect_num; sect++)
 	{
-		float sampleIn = buf[i];
+		coeffs[ind + 0] = filter->b[sect * 3 + 0];
+		coeffs[ind + 1] = filter->b[sect * 3 + 1];
+		coeffs[ind + 2] = filter->b[sect * 3 + 2];
+		coeffs[ind + 3] = -filter->a[sect * 3 + 1];
+		coeffs[ind + 4] = -filter->a[sect * 3 + 2];
+		ind += 5;
+	}
+}
+
+void arm_biquad_cascade_df2T_init_f32(
+  arm_biquad_cascade_df2T_instance_f32 * S,
+  uint8_t numStages,
+  float32_t * pCoeffs,
+  float32_t * pState)
+{
+  /* Assign filter stages */
+  S->numStages = numStages;
+
+  /* Assign coefficient pointer */
+  S->pCoeffs = pCoeffs;
+
+  /* Clear state buffer and size is always 2 * numStages */
+  memset(pState, 0, (2u * (uint32_t) numStages) * sizeof(float32_t));
+
+  /* Assign state pointer */
+  S->pState = pState;
+}
+
+void downsample_init(struct main_cb* mcb) {
+	filter = biquad_create(IIR_LPF_STAGES);
+	biquad_init_lowpass(filter, RTL_SAMPLE_RATE, mcb->output_rate / 2);
+	printf("Init LPF %d\n", mcb->output_rate / 2);
+	fill_biquad_coeffs(filter, IIR_LPF_Coeffs, IIR_LPF_STAGES);
+
+	for(uint8_t i = 0; i < mcb->active_num_rcvrs; i++) {
+		arm_biquad_cascade_df2T_init_f32(&(mcb->rcb[i].IIR_LPF_I), IIR_LPF_STAGES, IIR_LPF_Coeffs, (float32_t *)&(mcb->rcb[i].IIR_LPF_I_State[0]));
+		arm_biquad_cascade_df2T_init_f32(&(mcb->rcb[i].IIR_LPF_Q), IIR_LPF_STAGES, IIR_LPF_Coeffs, (float32_t *)&(mcb->rcb[i].IIR_LPF_Q_State[0]));
+		mcb->rcb[i].LPF_inited = true;
+	}
+}
+
+void decimate(float32_t *buff, uint32_t size, uint8_t rate) {
+	for(uint32_t i = 0; i < size / rate; i++){
+		buff[i] = buff[i * rate];
+	}
+}
+
+void
+downsample(struct rcvr_cb * rcb) {
+	if(!rcb->LPF_inited)
+		downsample_init(rcb->mcb);
+
+	arm_biquad_cascade_df2T_f32_rolled(&(rcb->IIR_LPF_I), &(rcb->iq_buf_I[0]), &(rcb->iq_buf_I[0]), RTL_READ_COUNT / 2);
+	arm_biquad_cascade_df2T_f32_rolled(&(rcb->IIR_LPF_Q), &(rcb->iq_buf_Q[0]), &(rcb->iq_buf_Q[0]), RTL_READ_COUNT / 2);
+
+	uint8_t decim_rate = DOWNSAMPLE_192;
+	if(rcb->mcb->output_rate == 48000)
+		decim_rate = DOWNSAMPLE_192 * 4;
+	if(rcb->mcb->output_rate == 96000)
+		decim_rate = DOWNSAMPLE_192 * 2;
+	if(rcb->mcb->output_rate == 384000)
+		decim_rate = DOWNSAMPLE_192 / 2;
+
+	decimate(&(rcb->iq_buf_I[0]), RTL_READ_COUNT / 2, decim_rate);
+	decimate(&(rcb->iq_buf_Q[0]), RTL_READ_COUNT / 2, decim_rate);
+
+	uint32_t j = 0;
+	float *out = &(rcb->iqSamples[rcb->iqSamples_remaining * 2]);
+	for(uint32_t i = 0; i < (RTL_READ_COUNT / 2 / decim_rate); i++)
+	{
+		static const float A1 = (1.0f - powf(2, -7)); // (1-2^(-11))
+
+		//I correct + swap + copy
+		static float I_x_prev = 0.0f;
+		static float I_y_prev = 0.0f;
+		float sampleIn = rcb->iq_buf_I[i];
 		float sampleOut = 0;
 		float delta_x = sampleIn - I_x_prev;
 		float a1_y_prev = A1 * I_y_prev;
 		sampleOut = delta_x + a1_y_prev;
 		I_x_prev = sampleIn;
 		I_y_prev = sampleOut;
-		buf[i] = sampleOut;
-	}
-	
-	//Q
-	static float Q_x_prev = 0.0f;
-	static float Q_y_prev = 0.0f;
-	for (int i = 0; i < count; i++)
-	{
-		float sampleIn = buf[count + i];
-		float sampleOut = 0;
-		float delta_x = sampleIn - Q_x_prev;
-		float a1_y_prev = A1 * Q_y_prev;
+		out[j+1] = sampleOut;
+
+		//Q correct + swap + copy
+		static float Q_x_prev = 0.0f;
+		static float Q_y_prev = 0.0f;
+		sampleIn = rcb->iq_buf_Q[i];
+		sampleOut = 0;
+		delta_x = sampleIn - Q_x_prev;
+		a1_y_prev = A1 * Q_y_prev;
 		sampleOut = delta_x + a1_y_prev;
 		Q_x_prev = sampleIn;
 		Q_y_prev = sampleOut;
-		buf[count + i] = sampleOut;
-	}
-}
+		out[j] = sampleOut;
 
-void
-downsample(struct rcvr_cb * rcb) {
-	down_loop(rcb, 1);
-	down_loop(rcb, 2);
-	correct_iq(rcb);
+		//iq step
+		j=j+2;
+	}
+	rcb->LPF_downsampled = true;
 }

@@ -508,6 +508,7 @@ hpsdrsim_thread(void* arg) {
 								printf("WARNING: UNSUPPORTED RATE: %x!!!\n", last_rate);
 							}
 
+							downsample_init(&mcb);
 							printf("Setting hpsdr output rate to %d hz\n",
 							       mcb.output_rate);
 						}
@@ -544,6 +545,7 @@ hpsdrsim_thread(void* arg) {
 								for(i = 1; i < mcb.active_num_rcvrs; i++) {
 									mcb.rcvrs_mask |= 1 << i;
 									mcb.rcb[i].rcvr_mask = 1 << i;
+									mcb.rcb[i].LPF_downsampled = true;
 								}
 
 								printf("Requested %d Activated %d actual rcvr(s)\n",
@@ -708,7 +710,7 @@ hpsdrsim_watchdog_thread(void* arg) {
 
 void
 rtlsdr_callback(unsigned char* buf, uint32_t len, void* ctx) {
-	int i, j;
+	int i;
 	struct rcvr_cb* rcb = (struct rcvr_cb*) ctx;
 
 	if(do_exit || !running || !ctx) {
@@ -720,15 +722,33 @@ rtlsdr_callback(unsigned char* buf, uint32_t len, void* ctx) {
 		perror("rtlsdr_callback(): RTL_READ_COUNT != len!");
 		return;
 	}
+	uint32_t try = 0;
+	while(!rcb->LPF_downsampled && try < 1000) {
+		usleep(1);
+		try++;
+	}
+	rcb->LPF_downsampled = false;
 
 	// Convert to float and copy data to buffer, offset by coefficient length * 2.
 	// The downsample routine will move the previous last coefficient length * 2
 	// to the beginning of the buffer. This is because of the FIR filter length, the
 	// filtering routine takes in 'filter_length' more samples than it outputs or
 	// coefficient length * 2 for I&Q (stereo) input samples.
-	for(i = 0, j = COEFF3072_H_16_LENGTH * 2; i < RTL_READ_COUNT; i++, j++)
-		rcb->iq_buf[j] = rtl_lut[buf[i]] * mcb.signal_multiplier[rcb->rcvr_num];
- 		// rcb->iq_buf[j] = (float)(buf[i]-127);
+	uint32_t j = 0;
+	for(i = 0; i < RTL_READ_COUNT; i++)
+	{
+		//rcb->iq_buf[j] = rtl_lut[buf[i]] * mcb.signal_multiplier[rcb->rcvr_num];
+		float32_t sample = rtl_lut[buf[i]] * mcb.signal_multiplier[rcb->rcvr_num];;
+		if((i % 2) == 0)
+		{
+ 			rcb->iq_buf_I[j] = sample;
+		}
+		else
+		{
+			rcb->iq_buf_Q[j] = sample;
+			j++;
+		}
+	}
 
 	pthread_mutex_lock(&iqready_lock);
 	rcvr_flags |= rcb->rcvr_mask;
@@ -949,6 +969,8 @@ main(int argc, char* argv[]) {
 	conf_file[0] = 0;
 	mcb.output_rate = 48000;
 	strcpy(mcb.net_dev, "eth0");
+
+	downsample_init(&mcb);
 
 	for(i = 0; i < MAX_RCVRS; i++) {
 		mcb.agc_mode[i] = 0;

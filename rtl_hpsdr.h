@@ -81,6 +81,17 @@ extern float coeff1536_192_H_64[COEFF1536_H_64_LENGTH];
 extern float coeff1536_96_H_64[COEFF1536_H_64_LENGTH];
 extern float coeff1536_48_H_64[COEFF1536_H_64_LENGTH];
 
+#define BIQUAD_COEFF_IN_STAGE 5
+#define IIR_LPF_STAGES 3
+#define IIR_LPF_Taps_STATE_SIZE (IIR_LPF_STAGES * 2)
+
+ typedef struct
+  {
+    uint8_t numStages;         /**< number of 2nd order stages in the filter.  Overall order is 2*numStages. */
+    float32_t *pState;         /**< points to the array of state coefficients.  The array is of length 2*numStages. */
+    float32_t *pCoeffs;        /**< points to the array of coefficients.  The array is of length 5*numStages. */
+  } arm_biquad_cascade_df2T_instance_f32;
+
 struct main_cb {
 	int total_num_rcvrs;
 	int active_num_rcvrs;
@@ -134,10 +145,20 @@ struct main_cb {
 		u_char rtl_buf[RTL_READ_COUNT];
 		float* iq_buf;
 		float* iq_buf_final;
+		
+		float iq_buf_I[RTL_READ_COUNT];
+		float iq_buf_Q[RTL_READ_COUNT];
+		float32_t IIR_LPF_I_State[IIR_LPF_Taps_STATE_SIZE];
+		float32_t IIR_LPF_Q_State[IIR_LPF_Taps_STATE_SIZE];
+		arm_biquad_cascade_df2T_instance_f32 IIR_LPF_I;
+		arm_biquad_cascade_df2T_instance_f32 IIR_LPF_Q;
+		bool LPF_inited;
+		bool LPF_downsampled;
 	} rcb[MAX_RCVRS];
 };
 
 void downsample(struct rcvr_cb* rcb);
+void downsample_init();
 void format_payload(void);
 int init_rtl(int rcvr_num, int dev_index);
 void load_packet(struct rcvr_cb* rcb);

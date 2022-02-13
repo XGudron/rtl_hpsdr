@@ -11,9 +11,9 @@ else
 endif
 
 CC = gcc
-CFLAGS += -I. -lpthread -lrtlsdr -lasound
-DEPS = rtl_hpsdr.h coeff.c downsample.c local_sound.c
-OBJ = coeff.o downsample.o rtl_hpsdr.o local_sound.o
+CFLAGS += -I. -lpthread -lrtlsdr -lasound -lm
+DEPS = rtl_hpsdr.h biquad.h biquad.c coeff.c downsample.c local_sound.c
+OBJ = coeff.o downsample.o rtl_hpsdr.o local_sound.o biquad.o
 PROG = rtl_hpsdr
 
 %.o: %.c $(DEPS)
